@@ -58,6 +58,10 @@ def affine_transform(image, rmatrix, order=3, scale=1.0, image_center=None,
 
     Notes
     -----
+    This function will cast any integer input data to float64, it is possible to
+    manually undo this by casting back with `numpy.ndarray.astype`, however to avoid
+    possible loss of precision this is not done automatically.
+
     This function is used throughout the SunPy code base as an equivalent to
     the IDL's rot() function. However, this function does not use the same
     algorithm as the IDL rot() function.
@@ -138,6 +142,5 @@ def affine_transform(image, rmatrix, order=3, scale=1.0, image_center=None,
         rotated_image += im_min
 
         if rotated_image.dtype != image.dtype:
-            rotated_image = rotated_image.astype(image.dtype)
-
+            warnings.warn("Rotating this image has change it's dtype", RuntimeWarning)
     return rotated_image
