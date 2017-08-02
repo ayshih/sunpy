@@ -3,15 +3,14 @@ from __future__ import absolute_import, division, print_function
 import pytest
 
 import numpy as np
-
 from astropy.coordinates import SkyCoord
 import astropy.units as u
-
-from sunpy.sun import sun
+import sunpy.coordinates
 import sunpy.map
 import sunpy.data.test
 from sunpy.coordinates import frames
 from sunpy.coordinates.utils import GreatArc
+from sunpy.sun import sun
 
 
 # Test the great arc code against calculable quantities
@@ -147,12 +146,9 @@ def test_great_arc_wrongly_formatted_points(points):
     with pytest.raises(ValueError):
         dummy = GreatArc(a, b).distances(points=points)
 
-    with pytest.raises(ValueError):
-        dummy = GreatArc(a, b).distances(points=points)
-
 
 # Test that the great arc code properly differentiates between the default
-# points and the requested points
+# points and the requested points.
 def test_great_arc_points_differentiates():
     m = sunpy.map.Map(sunpy.map.Map(sunpy.data.test.get_test_filepath('aia_171_level1.fits')))
     coordinate_frame = m.coordinate_frame
