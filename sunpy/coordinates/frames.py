@@ -14,11 +14,14 @@ from astropy.coordinates.representation import (CartesianRepresentation, Spheric
                                                 UnitSphericalRepresentation)
 
 from sunpy.sun.constants import radius as _RSUN
+from sunpy.util.decorators import add_common_docstring
+from sunpy.time.time import _variables_for_parse_time_docstring
 
 from .frameattributes import TimeFrameAttributeSunPy, ObserverCoordinateAttribute
 
 __all__ = ['HeliographicStonyhurst', 'HeliographicCarrington',
-           'Heliocentric', 'Helioprojective']
+           'Heliocentric', 'Helioprojective',
+           'HeliocentricEarthEcliptic']
 
 
 class SunPyBaseCoordinateFrame(BaseCoordinateFrame):
@@ -413,3 +416,33 @@ class Helioprojective(SunPyBaseCoordinateFrame):
         return self.realize_frame(SphericalRepresentation(lon=lon,
                                                           lat=lat,
                                                           distance=d))
+
+
+@add_common_docstring(**_variables_for_parse_time_docstring())
+class HeliocentricEarthEcliptic(SunPyBaseCoordinateFrame):
+    """
+    A coordinate or frame in the Heliocentric Earth Ecliptic system.
+
+    - The origin is the center of the Sun
+    - The z-axis is aligned with the mean ecliptic pole at the observation time
+    - The x-axis is aligned with the component of the Sun-Earth vector perpendicular to the z-axis
+
+    Parameters
+    ----------
+    data: `~astropy.coordinates.BaseRepresentation` subclass instance
+        A representation object or ``None`` to have no data (or use the coordinate component
+        arguments, see below).
+    lon: `~astropy.coordinates.Angle`, optional, must be keyword
+        The longitude for this object (``lat`` must also be given and
+        ``representation`` must be None).
+    lat: `~astropy.coordinates.Angle`, optional, must be keyword
+        The latitude for this object (``lon`` must also be given and
+        ``representation`` must be None).
+    distance: `~astropy.units.Quantity` , optional, must be keyword
+        The distance for this object from the Sun’s center. (``representation`` must be None).
+    obstime: {parse_time_types}
+        The date and time of the observation.
+    """
+    default_representation = SphericalRepresentation
+
+    obstime = TimeFrameAttributeSunPy()
