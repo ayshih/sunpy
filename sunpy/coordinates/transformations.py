@@ -35,7 +35,7 @@ except ImportError:
 from sunpy.sun import constants
 
 from .frames import (Heliocentric, Helioprojective, HeliographicCarrington, HeliographicStonyhurst,
-                     HeliocentricEarthEcliptic, GeocentricSolarEcliptic)
+                     HeliocentricEarthEcliptic, GeocentricSolarEcliptic, HeliocentricInertial)
 
 try:
     from astropy.coordinates.builtin_frames import _make_transform_graph_docs as make_transform_graph_docs
@@ -52,7 +52,8 @@ __all__ = ['hgs_to_hgc', 'hgc_to_hgs', 'hcc_to_hpc',
            'hcrs_to_hgs', 'hgs_to_hcrs',
            'hgs_to_hgs', 'hgc_to_hgc', 'hcc_to_hcc',
            'hme_to_hee', 'hee_to_hme', 'hee_to_hee',
-           'hee_to_gse', 'gse_to_hee', 'gse_to_gse']
+           'hee_to_gse', 'gse_to_hee', 'gse_to_gse',
+           'hme_to_hci', 'hci_to_hme', 'hci_to_hci']
 
 
 def _carrington_offset(obstime):
@@ -534,6 +535,77 @@ def gse_to_gse(from_coo, to_frame):
         return from_coo.transform_to(HeliocentricEarthEcliptic).transform_to(to_frame)
 
 
+def _rotation_matrix_hme_to_hci(hmeframe):
+    """
+    Return the rotation matrix from HME to HCI at the same observation time
+    """
+    # Get the ecliptic pole and the solar rotation axis
+    ecliptic_pole = hmeframe.realize_frame(CartesianRepresentation(0, 0, 1)*u.m)
+    solar_rot_axis = HeliographicStonyhurst(CartesianRepresentation(0, 0, 1)*u.m,
+                                            obstime=hmeframe.obstime).transform_to(hmeframe)
+
+    # Align the solar rotation axis with the Z axis
+    detilt_matrix = _rotation_matrix_repr_to_repr(solar_rot_axis.cartesian,
+                                                  CartesianRepresentation(0, 0, 1))
+    detilted_ecliptic_pole = ecliptic_pole.cartesian.transform(detilt_matrix)
+
+    # Then align the de-tilted ecliptic pole with the Y axis, which aligns the solar ascending node
+    # with the X axis
+    rot_matrix = _rotation_matrix_reprs_to_xz_about_z(detilted_ecliptic_pole)
+    x_to_y_matrix = _rotation_matrix_repr_to_repr(CartesianRepresentation(1, 0, 0),
+                                                  CartesianRepresentation(0, 1, 0))
+    rot_matrix = matrix_product(x_to_y_matrix, rot_matrix)
+
+    return matrix_product(rot_matrix, detilt_matrix)
+
+
+@frame_transform_graph.transform(FunctionTransformWithFiniteDifference,
+                                 HeliocentricMeanEcliptic, HeliocentricInertial)
+def hme_to_hci(hmecoord, hciframe):
+    """
+    Convert from Heliocentric Mean Ecliptic to Heliocentric Inertial
+    """
+    # Convert to the HME frame with mean J2000.0 ecliptic at the HEE obstime, through HCRS
+    int_frame = HeliocentricMeanEcliptic(obstime=hciframe.obstime, equinox='J2000.0')
+    int_coord = hmecoord.transform_to(HCRS).transform_to(int_frame)
+
+    # Rotate the intermediate coord to the HEE frame
+    total_matrix = _rotation_matrix_hme_to_hci(int_frame)
+    newrepr = int_coord.cartesian.transform(total_matrix)
+
+    return hciframe.realize_frame(newrepr)
+
+
+@frame_transform_graph.transform(FunctionTransformWithFiniteDifference,
+                                 HeliocentricInertial, HeliocentricMeanEcliptic)
+def hci_to_hme(hcicoord, hmeframe):
+    """
+    Convert from Heliocentric Inertial to Heliocentric Mean Ecliptic
+    """
+    # Use the intermediate frame of HME with mean J2000.0 ecliptic at HCI obstime
+    int_frame = HeliocentricMeanEcliptic(obstime=hcicoord.obstime, equinox='J2000.0')
+
+    # Convert the HCI coord to the intermediate frame
+    total_matrix = matrix_transpose(_rotation_matrix_hme_to_hci(int_frame))
+    newrepr = hcicoord.cartesian.transform(total_matrix)
+    int_coord = int_frame.realize_frame(newrepr)
+
+    # Convert to the final frame through HCRS
+    return int_coord.transform_to(HCRS).transform_to(hmeframe)
+
+
+@frame_transform_graph.transform(FunctionTransformWithFiniteDifference,
+                                 HeliocentricInertial, HeliocentricInertial)
+def hci_to_hci(from_coo, to_frame):
+    """
+    Convert between two Heliocentric Inertial frames.
+    """
+    if np.all(from_coo.obstime == to_frame.obstime):
+        return to_frame.realize_frame(from_coo.data)
+    else:
+        return from_coo.transform_to(HCRS).transform_to(to_frame)
+
+
 def _make_sunpy_graph():
     """
     Culls down the full transformation graph for SunPy purposes and returns the string version
@@ -543,6 +615,7 @@ def _make_sunpy_graph():
                  'heliographic_stonyhurst', 'heliographic_carrington',
                  'heliocentric', 'helioprojective',
                  'heliocentricearthecliptic', 'geocentricsolarecliptic',
+                 'heliocentricinertial',
                  'gcrs', 'precessedgeocentric', 'geocentrictrueecliptic', 'geocentricmeanecliptic',
                  'cirs', 'altaz', 'itrs']
 
@@ -622,7 +695,8 @@ def _tweak_graph(docstr):
     # Set the nodes for SunPy frames to be white
     sunpy_frames = ['HeliographicStonyhurst', 'HeliographicCarrington',
                     'Heliocentric', 'Helioprojective',
-                    'HeliocentricEarthEcliptic', 'GeocentricSolarEcliptic']
+                    'HeliocentricEarthEcliptic', 'GeocentricSolarEcliptic',
+                    'HeliocentricInertial']
     for frame in sunpy_frames:
         output = output.replace(frame + ' [', frame + ' [fillcolor=white ')
 
