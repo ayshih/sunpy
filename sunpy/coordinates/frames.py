@@ -12,6 +12,7 @@ from astropy.coordinates.baseframe import BaseCoordinateFrame, RepresentationMap
 from astropy.coordinates.representation import (CartesianRepresentation, SphericalRepresentation,
                                                 CylindricalRepresentation,
                                                 UnitSphericalRepresentation)
+from astropy.coordinates import HeliocentricMeanEcliptic
 
 from sunpy.sun.constants import radius as _RSUN
 
@@ -19,6 +20,12 @@ from .frameattributes import TimeFrameAttributeSunPy, ObserverCoordinateAttribut
 
 __all__ = ['HeliographicStonyhurst', 'HeliographicCarrington',
            'Heliocentric', 'Helioprojective']
+
+
+# Add aliases for Astropy's HeliocentricMeanEcliptic
+if not isinstance(HeliocentricMeanEcliptic.name, list):
+    HeliocentricMeanEcliptic.name = [HeliocentricMeanEcliptic.name]
+HeliocentricMeanEcliptic.name += ['heliocentricariesecliptic', 'HAE']
 
 
 class SunPyBaseCoordinateFrame(BaseCoordinateFrame):
@@ -104,7 +111,7 @@ class HeliographicStonyhurst(SunPyBaseCoordinateFrame):
     This frame will always be converted a 3D frame where the radius defaults to
     rsun.
     """
-    name = "heliographic_stonyhurst"
+    name = ["heliographic_stonyhurst", 'HGS', 'heliocentricearthequatorial', 'HEEQ']
     default_representation = SphericalRepresentation
 
     frame_specific_representation_info = {
@@ -204,7 +211,7 @@ class HeliographicCarrington(HeliographicStonyhurst):
         [(1., 4., 5.), (2., 5., 6.), (3., 6., 7.)]>
     """
 
-    name = "heliographic_carrington"
+    name = ["heliographic_carrington", 'HGC']
     default_representation = SphericalRepresentation
 
 
@@ -283,6 +290,7 @@ class Heliocentric(BaseCoordinateFrame):
     <SkyCoord (Heliocentric: obstime=2011-01-01T00:00:54.000, observer=<HeliographicStonyhurst Coordinate for 'earth'>): (x, y, z) in (km, m, cm)
         [(1., 3., 5.), (2., 4., 6.)]>
     """
+    name = ['heliocentric', 'HCC']
 
     default_representation = CartesianRepresentation
 
@@ -340,6 +348,7 @@ class Helioprojective(SunPyBaseCoordinateFrame):
     <SkyCoord (Helioprojective: obstime=2010-01-01T00:00:00.000, rsun=695700.0 km, observer=<HeliographicStonyhurst Coordinate for 'earth'>): (Tx, Ty) in arcsec
         (0., 0.)>
     """
+    name = ['helioprojective', 'HPC']
 
     default_representation = SphericalRepresentation
 

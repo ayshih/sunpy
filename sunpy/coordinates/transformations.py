@@ -405,8 +405,8 @@ def _make_sunpy_graph():
     backup_graph = deepcopy(frame_transform_graph)
 
     small_graph = deepcopy(frame_transform_graph)
-    cull_list = [name for name in small_graph.get_names() if name not in keep_list]
-    cull_frames = [small_graph.lookup_name(name) for name in cull_list]
+    keep_frames = [small_graph.lookup_name(name) for name in keep_list]
+    cull_frames = [f for f in small_graph.frame_set if f not in keep_frames]
 
     for frame in cull_frames:
         # Remove the part of the graph where the unwanted frame is the source frame
@@ -417,10 +417,7 @@ def _make_sunpy_graph():
         for entry in small_graph._graph:
             if frame in small_graph._graph[entry]:
                 del (small_graph._graph[entry])[frame]
-
-    # Clean up the node list
-    for name in cull_list:
-        small_graph._cached_names.pop(name)
+    small_graph.invalidate_cache()
 
     _add_astropy_node(small_graph)
 
