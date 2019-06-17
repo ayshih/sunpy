@@ -18,8 +18,8 @@ from copy import deepcopy
 import numpy as np
 
 import astropy.units as u
-from astropy.coordinates import ICRS, HCRS, ConvertError, BaseCoordinateFrame, get_body_barycentric
-from astropy.coordinates.baseframe import frame_transform_graph
+from astropy.coordinates import ICRS, HCRS, ConvertError, get_body_barycentric, SkyCoord
+from astropy.coordinates.baseframe import BaseCoordinateFrame, frame_transform_graph
 from astropy.coordinates.representation import (CartesianRepresentation, SphericalRepresentation,
                                                 UnitSphericalRepresentation)
 from astropy.coordinates.transformations import (FunctionTransform, DynamicMatrixTransform,
@@ -122,36 +122,40 @@ def hgc_to_hgs(hgccoord, hgsframe):
     return hgsframe.realize_frame(representation)
 
 
-@frame_transform_graph.transform(FunctionTransform, Heliocentric,
-                                 Helioprojective)
+def _matrix_hcc_to_hpc():
+    # Returns the transformation matrix that permutes/swaps axes from HCC to HPC
+    # HPC spherical coordinates are a left-handed frame with these equivalent Cartesian axes:
+    #   HPC_X = -HCC_Z
+    #   HPC_Y = HCC_X
+    #   HPC_Z = HCC_Y
+    # (HPC_X and HPC_Y are not to be confused with HPC_Tx and HPC_Ty)
+    return np.array([[0, 0, -1],
+                     [1, 0, 0],
+                     [0, 1, 0]])
+
+
+@frame_transform_graph.transform(FunctionTransformWithFiniteDifference,
+                                 Heliocentric, Helioprojective)
 def hcc_to_hpc(helioccoord, heliopframe):
     """
-    Convert from Heliocentic Cartesian to Helioprojective Cartesian.
+    Convert from Heliocentric Cartesian to Helioprojective Cartesian.
     """
     if not _observers_are_equal(helioccoord.observer, heliopframe.observer):
         heliocframe = Heliocentric(observer=heliopframe.observer)
-        new_helioccoord = helioccoord.transform_to(heliocframe)
-        helioccoord = new_helioccoord
+        helioccoord = helioccoord.transform_to(heliocframe)
 
-    x = helioccoord.x.to(u.m)
-    y = helioccoord.y.to(u.m)
-    z = helioccoord.z.to(u.m)
+    # Shift the origin from the Sun to the observer
+    distance = SkyCoord(helioccoord.observer).heliographic_stonyhurst.radius
+    newrepr = helioccoord.cartesian - CartesianRepresentation(0*u.m, 0*u.m, distance)
 
-    # d is calculated as the distance between the points
-    # (x,y,z) and (0,0,D0).
-    distance = np.sqrt(x**2 + y**2 + (helioccoord.observer.radius - z)**2)
+    # Permute/swap axes from HCC to HPC equivalent Cartesian
+    newrepr = newrepr.transform(_matrix_hcc_to_hpc())
 
-    hpcx = np.rad2deg(np.arctan2(x, helioccoord.observer.radius - z))
-    hpcy = np.rad2deg(np.arcsin(y / distance))
-
-    representation = SphericalRepresentation(hpcx, hpcy,
-                                             distance.to(u.km))
-
-    return heliopframe.realize_frame(representation)
+    return heliopframe.realize_frame(newrepr)
 
 
-@frame_transform_graph.transform(FunctionTransform, Helioprojective,
-                                 Heliocentric)
+@frame_transform_graph.transform(FunctionTransformWithFiniteDifference,
+                                 Helioprojective, Heliocentric)
 def hpc_to_hcc(heliopcoord, heliocframe):
     """
     Convert from Helioprojective Cartesian to Heliocentric Cartesian.
@@ -168,22 +172,15 @@ def hpc_to_hcc(heliopcoord, heliocframe):
                            "without `obstime` being specified.".format(heliopcoord.observer))
 
     heliopcoord = heliopcoord.calculate_distance()
-    x = np.deg2rad(heliopcoord.Tx)
-    y = np.deg2rad(heliopcoord.Ty)
 
-    cosx = np.cos(x)
-    sinx = np.sin(x)
-    cosy = np.cos(y)
-    siny = np.sin(y)
+    # Permute/swap axes from HPC equivalent Cartesian to HCC
+    newrepr = heliopcoord.cartesian.transform(matrix_transpose(_matrix_hcc_to_hpc()))
 
-    rx = (heliopcoord.distance.to(u.m)) * cosy * sinx
-    ry = (heliopcoord.distance.to(u.m)) * siny
-    rz = (heliopcoord.observer.radius.to(u.m)) - (
-        heliopcoord.distance.to(u.m)) * cosy * cosx
+    # Shift the origin from the observer to the Sun
+    distance = SkyCoord(heliocframe.observer).heliographic_stonyhurst.radius
+    newrepr += CartesianRepresentation(0*u.m, 0*u.m, distance)
 
-    representation = CartesianRepresentation(
-        rx.to(u.km), ry.to(u.km), rz.to(u.km))
-    return heliocframe.realize_frame(representation)
+    return heliocframe.realize_frame(newrepr)
 
 
 @frame_transform_graph.transform(FunctionTransform, Heliocentric,
