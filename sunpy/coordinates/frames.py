@@ -11,7 +11,8 @@ from astropy.coordinates import Attribute, ConvertError
 from astropy.coordinates.baseframe import BaseCoordinateFrame, RepresentationMapping
 from astropy.coordinates.representation import (CartesianRepresentation, SphericalRepresentation,
                                                 CylindricalRepresentation,
-                                                UnitSphericalRepresentation)
+                                                UnitSphericalRepresentation,
+                                                PhysicsSphericalRepresentation)
 
 from sunpy.sun.constants import radius as _RSUN
 from sunpy.util.decorators import add_common_docstring
@@ -20,7 +21,7 @@ from sunpy.time.time import _variables_for_parse_time_docstring
 from .frameattributes import TimeFrameAttributeSunPy, ObserverCoordinateAttribute
 
 __all__ = ['HeliographicStonyhurst', 'HeliographicCarrington',
-           'Heliocentric', 'Helioprojective',
+           'Heliocentric', 'Helioprojective', 'HelioprojectiveRadial',
            'HeliocentricEarthEcliptic', 'GeocentricSolarEcliptic',
            'HeliocentricInertial']
 
@@ -512,3 +513,54 @@ class HeliocentricInertial(SunPyBaseCoordinateFrame):
     default_representation = SphericalRepresentation
 
     obstime = TimeFrameAttributeSunPy()
+
+
+@add_common_docstring(**_variables_for_parse_time_docstring())
+class HelioprojectiveRadial(SunPyBaseCoordinateFrame):
+    """
+    A coordinate or frame in the Helioprojective Radial system.
+
+    This is an observer-based spherical coordinate system, with:
+
+    - ``psi`` is the position angle of the coordinate, measured eastward from solar north
+    - ``theta`` is the angle between the observer-Sun line and the observer-coordinate line
+    - ``r`` is the observer-coordinate distance
+
+    .. warning::
+        While Helioprojective Radial is a projective coordinate system, this class requires the
+        full 3D coordinates to be supplied.
+
+    Parameters
+    -------
+    data: `~astropy.coordinates.BaseRepresentation` subclass instance
+        A representation object or ``None`` to have no data (or use the coordinate component
+        arguments, see below).
+    theta: `~astropy.coordinates.Angle`, optional, must be keyword
+        The angle between the observer-Sun line and the observer-coordinate line.
+    psi: `~astropy.coordinates.Angle`, optional, must be keyword
+        The position angle of the coordinate measured eastward from solar north.
+    r: `~astropy.units.Quantity`, optional, must be keyword
+        The radial distance from the observer to the coordinate point.
+    obstime: {parse_time_types}
+        The date and time of the observation.
+    observer: `~sunpy.coordinates.frames.HeliographicStonyhurst`, str
+        The coordinate of the observer in the solar system. If you supply a string,
+        it must be a solar system body that can be parsed by
+        `~sunpy.coordinates.ephemeris.get_body_heliographic_stonyhurst`.
+    """
+    default_representation = PhysicsSphericalRepresentation
+
+    frame_specific_representation_info = {
+        PhysicsSphericalRepresentation: [RepresentationMapping(reprname='phi',
+                                                               framename='psi',
+                                                               defaultunit=u.deg),
+                                         RepresentationMapping(reprname='theta',
+                                                               framename='theta',
+                                                               defaultunit=u.arcsec),
+                                         RepresentationMapping(reprname='r',
+                                                               framename='r',
+                                                               defaultunit=u.AU)],
+    }
+
+    obstime = TimeFrameAttributeSunPy()
+    observer = ObserverCoordinateAttribute(HeliographicStonyhurst, default="earth")

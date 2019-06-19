@@ -34,7 +34,8 @@ except ImportError:
 
 from sunpy.sun import constants
 
-from .frames import (Heliocentric, Helioprojective, HeliographicCarrington, HeliographicStonyhurst,
+from .frames import (Heliocentric, Helioprojective, HelioprojectiveRadial,
+                     HeliographicCarrington, HeliographicStonyhurst,
                      HeliocentricEarthEcliptic, GeocentricSolarEcliptic, HeliocentricInertial)
 
 try:
@@ -53,7 +54,8 @@ __all__ = ['hgs_to_hgc', 'hgc_to_hgs', 'hcc_to_hpc',
            'hgs_to_hgs', 'hgc_to_hgc', 'hcc_to_hcc',
            'hme_to_hee', 'hee_to_hme', 'hee_to_hee',
            'hee_to_gse', 'gse_to_hee', 'gse_to_gse',
-           'hme_to_hci', 'hci_to_hme', 'hci_to_hci']
+           'hme_to_hci', 'hci_to_hme', 'hci_to_hci',
+           'hpc_to_hpr', 'hpr_to_hpc']
 
 
 def _carrington_offset(obstime):
@@ -614,6 +616,65 @@ def hci_to_hci(from_coo, to_frame):
         return to_frame.realize_frame(from_coo.data)
     else:
         return from_coo.transform_to(HCRS).transform_to(to_frame)
+
+
+def _matrix_hpc_to_hpr():
+    # Returns the transformation matrix that permutes/swaps axes from HCC to HPC
+    # HPR spherical coordinates are a left-handed frame with these equivalent Cartesian axes:
+    #   HPR_X = HPC_Z
+    #   HPR_Y = -HPC_Y
+    #   HPR_Z = HPC_X
+    # (HPC_X and HPC_Y are not to be confused with HPC_Tx and HPC_Ty)
+    return np.array([[0, 0, 1],
+                     [0, -1, 0],
+                     [1, 0, 0]])
+
+
+@frame_transform_graph.transform(FunctionTransformWithFiniteDifference,
+                                 Helioprojective, HelioprojectiveRadial)
+def hpc_to_hpr(hpc_coord, hpr_frame):
+    """
+    Convert from Helioprojective Cartesian to Helioprojective Radial.
+    """
+    if not _observers_are_equal(hpc_coord.observer, hpr_frame.observer):
+        int_frame = Helioprojective(observer=hpr_frame.observer)
+        int_coord = hpc_coord.transform_to(int_frame)
+    else:
+        int_coord = hpc_coord
+
+    if not isinstance(hpc_coord.observer, BaseCoordinateFrame):
+        raise ConvertError("Cannot transform helioprojective coordinates to "
+                           "heliocentric coordinates for observer '{}' "
+                           "without `obstime` being specified.".format(hpc_coord.observer))
+
+    # Permute/swap axes from HPC to HPR equivalent Cartesian
+    newrepr = int_coord.cartesian.transform(_matrix_hpc_to_hpr())
+
+    return hpr_frame.realize_frame(newrepr)
+
+
+@frame_transform_graph.transform(FunctionTransformWithFiniteDifference,
+                                 HelioprojectiveRadial, Helioprojective)
+def hpr_to_hpc(hpr_coord, hpc_frame):
+    """
+    Convert from Helioprojective Radial to Helioprojective Cartesian.
+    """
+    if not _observers_are_equal(hpr_coord.observer, hpc_frame.observer):
+        int_frame = Helioprojective(observer=hpr_coord.observer)
+        int_coord = hpr_coord.transform_to(int_frame)
+    else:
+        int_coord = hpr_coord
+
+    if not isinstance(hpr_coord.observer, BaseCoordinateFrame):
+        raise ConvertError("Cannot transform helioprojective coordinates to "
+                           "heliocentric coordinates for observer '{}' "
+                           "without `obstime` being specified.".format(hpr_coord.observer))
+
+    # Permute/swap axes from HPR to HPC equivalent Cartesian
+    newrepr = int_coord.cartesian.transform(matrix_transpose(_matrix_hpc_to_hpr()))
+
+    return hpc_frame.realize_frame(newrepr)
+
 
 
 def _make_sunpy_graph():
