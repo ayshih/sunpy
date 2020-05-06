@@ -316,6 +316,7 @@ More Detailed Information
    :maxdepth: 1
 
    carrington
+   astrometricframe
    rotatedsunframe
    wcs
    other_api
