@@ -4,7 +4,7 @@ Coordinate frames that are defined relative to other frames
 
 from astropy import units as u
 from astropy.constants import c as speed_of_light
-from astropy.coordinates import ICRS, SkyCoord, SphericalRepresentation
+from astropy.coordinates import ConvertError, ICRS, SkyCoord, SphericalRepresentation
 from astropy.coordinates.attributes import Attribute, QuantityAttribute
 from astropy.coordinates.baseframe import frame_transform_graph
 from astropy.coordinates.transformations import FunctionTransform
@@ -15,6 +15,7 @@ from sunpy.time import parse_time
 from sunpy.time.time import _variables_for_parse_time_docstring
 from sunpy.util.decorators import add_common_docstring
 
+from .frameattributes import TimeFrameAttributeSunPy
 from .frames import _J2000, HeliocentricInertial, SunPyBaseCoordinateFrame
 from .offset_frame import NorthOffsetFrame
 from .transformations import _transformation_debug
@@ -30,6 +31,9 @@ NorthOffsetFrame.__module__ = __name__
 _rotatedsun_cache = {}
 _astrometric_cache = {}
 
+# The threshold distance that distinguishes between solar-system bodies and cosmic objects
+_DISTANCE_THRESHOLD = 1*u.lyr
+
 
 def _conform_frame_input(frame):
     # If a SkyCoord is provided, use the underlying frame
@@ -37,6 +41,7 @@ def _conform_frame_input(frame):
         frame = frame.frame
 
     # The frame needs to be a SunPy frame to have the overridden size() property
+    # This can be removed with Astropy 4.0
     if not isinstance(frame, SunPyBaseCoordinateFrame):
         raise TypeError("Only SunPy coordinate frames are currently supported.")
 
@@ -298,50 +303,55 @@ def _make_astrometric_cls(framecls):
     @_transformation_debug(f"{framecls.__name__}->{_AstrometricFramecls.__name__}")
     def reference_to_astrometric(reference_coord, astrometric_frame):
         reference_coord = reference_coord.transform_to(astrometric_frame.base)
-        dt = astrometric_frame.light_travel_time_from(reference_coord)
-        log.debug(f"Retarding for {dt} of light travel time")
-        posvel = reference_coord.transform_to(ICRS).cartesian
+        icrs_coord = reference_coord.transform_to(ICRS)
+
+        posvel = icrs_coord.cartesian
         if 's' in posvel.differentials:
-            pos = posvel.without_differentials()
-            pos -= posvel.differentials['s'] * dt
-            posvel = pos.with_differentials(posvel.differentials['s'])
-            reference_coord = ICRS(posvel).transform_to(reference_coord)
+            distance = posvel.norm()
+            if np.all(distance < _DISTANCE_THRESHOLD):  # solar-system body
+                dt = astrometric_frame.light_travel_time_from(reference_coord)
+                log.debug(f"Retarding for {dt} of light travel time")
+                pos = posvel.without_differentials()
+                pos -= posvel.differentials['s'] * dt
+                posvel = pos.with_differentials(posvel.differentials['s'])
+                icrs_coord = ICRS(posvel)
+            elif np.all(distance >= _DISTANCE_THRESHOLD):  # cosmic object
+                dt = (astrometric_frame.obstime - astrometric_frame.ref_epoch).to(u.yr)
+                log.debug(f"Propagating forward by {dt} after {astrometric_frame.ref_epoch}")
+                icrs_coord = SkyCoord(icrs_coord).apply_space_motion(dt=dt).frame
+            else:  # a mix
+                raise ConvertError("The transformation cannot handle a mix of solar-system bodies "
+                                   "and cosmic objects.")
+
+        reference_coord = icrs_coord.transform_to(reference_coord)
         return astrometric_frame.realize_frame(reference_coord.data)
 
     @frame_transform_graph.transform(FunctionTransform, _AstrometricFramecls, framecls)
     @_transformation_debug(f"{_AstrometricFramecls.__name__}->{framecls.__name__}")
     def astrometric_to_reference(astrometric_coord, reference_frame):
-        dt = astrometric_coord.light_travel_time_from()
-        log.debug(f"Advancing for {dt} of light travel time")
         base_coord = astrometric_coord.as_base()
-        posvel = base_coord.transform_to(ICRS).cartesian
+        icrs_coord = base_coord.transform_to(ICRS)
+
+        posvel = icrs_coord.cartesian
         if 's' in posvel.differentials:
-            pos = posvel.without_differentials()
-            pos += posvel.differentials['s'] * dt
-            posvel = pos.with_differentials(posvel.differentials['s'])
-            base_coord = ICRS(posvel).transform_to(base_coord)
+            distance = posvel.norm()
+            if np.all(distance < _DISTANCE_THRESHOLD):  # solar-system body
+                dt = astrometric_coord.light_travel_time_from()
+                log.debug(f"Advancing for {dt} of light travel time")
+                pos = posvel.without_differentials()
+                pos += posvel.differentials['s'] * dt
+                posvel = pos.with_differentials(posvel.differentials['s'])
+                icrs_coord = ICRS(posvel)
+            elif np.all(distance >= _DISTANCE_THRESHOLD):  # cosmic object
+                dt = (astrometric_coord.obstime - astrometric_coord.ref_epoch).to(u.yr)
+                log.debug(f"Propagating backward by {dt} before {astrometric_coord.ref_epoch}")
+                icrs_coord = SkyCoord(icrs_coord).apply_space_motion(dt=-dt).frame
+            else:  # a mix
+                raise ConvertError("The transformation cannot handle a mix of solar-system bodies "
+                                   "and cosmic objects.")
+
+        base_coord = icrs_coord.transform_to(base_coord)
         return base_coord.transform_to(reference_frame)
-
-    """
-    # Adding these to the transform graph causes mayhem!
-
-    @frame_transform_graph.transform(FunctionTransform, ICRS, _AstrometricFramecls)
-    @_transformation_debug(f"ICRS->{_AstrometricFramecls.__name__}")
-    def icrs_to_astrometric(icrs_coord, astrometric_frame):
-        dt = (astrometric_frame.obstime - _J2000).to(u.yr)
-        log.debug(f"Propagating forward by {dt} after J2000.0")
-        icrs_sc = SkyCoord(icrs_coord).apply_space_motion(dt=dt)
-        reference_sc = icrs_sc.transform_to(astrometric_frame.base)
-        return astrometric_frame.realize_frame(reference_sc.data)
-
-    @frame_transform_graph.transform(FunctionTransform, _AstrometricFramecls, ICRS)
-    @_transformation_debug(f"{_AstrometricFramecls.__name__}->ICRS")
-    def astrometric_to_icrs(astrometric_coord, icrs_frame):
-        dt = (astrometric_frame.obstime - _J2000).to(u.yr)
-        log.debug(f"Propagating backward by {-dt} before J2000.0")
-        icrs_sc = SkyCoord(astrometric_coord.as_base()).transform_to(ICRS)
-        return icrs_sc.apply_space_motion(dt=dt).frame
-    """
 
     _astrometric_cache[framecls] = _AstrometricFramecls
     return _AstrometricFramecls
@@ -352,6 +362,10 @@ class AstrometricFrame:
     """
     An astrometric version of a base coordinate frame.
 
+    .. note::
+
+        See :ref:`sunpy-coordinates-astrometricframe` for how to use this class.
+
     The astrometric location of a body is the location of the body as measured by an observer,
     which depends on the motion of that body:
 
@@ -361,8 +375,7 @@ class AstrometricFrame:
       moving, then the observer will measure the body to be where it was at that earlier time.
       This effect is also known as "planetary aberration".
 
-    * **(not yet working)**
-      For a cosmic object, its coordinate normally represents its catalog location at a reference
+    * For a cosmic object, its coordinate normally represents its catalog location at a reference
       epoch (e.g., J2000.0).  If the body is moving (i.e., has non-zero "proper motion" or "radial
       velocity"), its measured location will evolve over time.  In this case, light travel time is
       already included in the catalog location.
@@ -371,8 +384,6 @@ class AstrometricFrame:
         The astrometric calculation assumes that the body is moving in a straight line with its
         specified velocity.  The accuracy of this assumption depends on the body's true motion and
         the observer-body distance (or light travel time).
-
-    See :ref:`sunpy-coordinates-astrometricframe` for how to use this class.
 
     Parameters
     ----------
@@ -383,13 +394,21 @@ class AstrometricFrame:
         The coordinate which specifies the base coordinate frame.  The frame must be a SunPy frame.
     observer : `~astropy.coordinates.SkyCoord` or low-level coordinate object.
         The coordinate which specifies the observer coordinate frame.  If an observer is not
-        provided this way, the observer from ``base`` (if one exists) will be used.  The frame must
-        be a SunPy frame.
+        provided this way, the observer from ``base`` will be used if it exists.  If an observer is
+        not provided in either fashion, astrometric calculations for solar-system bodies cannot be
+        performed.  The frame must be a SunPy frame.
+    ref_epoch : {parse_time_types}
+        The reference epoch for the location of cosmic objects.  Defaults to J2000.0.
 
     Notes
     -----
     If the coordinate has no velocity included, then its astrometric location is the same as its
     instantaneous location.
+
+    The astrometric calculation distinguishes between bodies in the solar system and cosmic objects
+    by the distance from the solar-system barycenter (SSB).  The coordinates of bodies less than 1
+    light-year from the SSB are treated as instantaneous locations.  The coordinates of bodies
+    greater than 1 light-year from the SSB are treated as locations at the reference epoch.
 
     As these are "astrometric" coordinates rather than "apparent" coordinates, effects such as
     stellar aberration and gravitational deflection are not included.
@@ -407,6 +426,8 @@ class AstrometricFrame:
     # a common frame.
     base = Attribute()
     observer = Attribute()
+
+    ref_epoch = TimeFrameAttributeSunPy(default=_J2000)
 
     def __new__(cls, *args, **kwargs):
         # We don't want to call this method if we've already set up
@@ -430,39 +451,44 @@ class AstrometricFrame:
         return super().__new__(cls, *args, **kwargs)
 
     def __init__(self, *args, **kwargs):
-        # Validate inputs
+        # Validate base obstime
+        if kwargs['base'].obstime is None:
+            raise ValueError("The base coordinate frame must have a defined `obstime`.")
 
         # If `observer` isn't provided explicitly, try to pull it from `base`
         if kwargs.get('observer', None) is None:
             kwargs['observer'] = getattr(kwargs['base'], 'observer', None)
-            if kwargs['observer'] is None:
-                raise TypeError("Can't initialize an AstrometricFrame without an `observer` "
-                                "keyword if the base frame has no observer.")
-        kwargs['observer'] = _conform_frame_input(kwargs['observer'])
 
-        if kwargs['base'].obstime is None:
-            raise ValueError("The base coordinate frame must have a defined `obstime`.")
+        # Validate observer obstime if there is an observer
+        if kwargs['observer'] is not None:
+            kwargs['observer'] = _conform_frame_input(kwargs['observer'])
 
-        if kwargs['observer'].obstime is None:
-            raise ValueError("The observer coordinate frame must have a defined `obstime`.")
+            if kwargs['observer'].obstime is None:
+                raise ValueError("The observer coordinate frame must have a defined `obstime`.")
 
-        if np.any(kwargs['base'].obstime != kwargs['observer'].obstime):
-            raise ValueError("The `obstime` for the base coordinate frame must match the "
-                             "`obstime` for the observer coordinate frame.")
+            if np.any(kwargs['base'].obstime != kwargs['observer'].obstime):
+                raise ValueError("The `obstime` for the base coordinate frame must match the "
+                                 "`obstime` for the observer coordinate frame.")
 
         super().__init__(*args, **kwargs)
 
-        if self.obstime is not None and np.any(self.obstime != self.base.obstime):
-            raise ValueError("The `obstime` for the main coordinate frame must match the "
-                             "`obstime` for the base coordinate frame.")
-
-        # Make every obstime match
-        self._obstime = self.base.obstime
+        # Validate main obstime
+        if self.obstime is not None:
+            if np.any(self.obstime != self.base.obstime):
+                raise ValueError("The `obstime` for the main coordinate frame must match the "
+                                 "`obstime` for the base coordinate frame.")
+        else:
+            self._obstime = self.base.obstime
 
         # Move data out from the base frame
         if self.base.has_data:
             self._data = self.base.data
             self._base = self.base.replicate_without_data()
+
+        # Check that any frame data is not dimensionless
+        if self.has_data:
+            if self._data.norm().unit is u.one:
+                raise ValueError("The frame data must have distance units.")
 
     def as_base(self):
         """
@@ -489,23 +515,5 @@ class AstrometricFrame:
         """
         if body is None:
             body = self.as_base()
-        distance = SkyCoord(body).separation_3d(SkyCoord(self.observer))  # There's a bug in Astropy
+        distance = SkyCoord(body).separation_3d(SkyCoord(self.observer))
         return (distance / speed_of_light).to('s')
-
-    def from_icrs(self, icrs_coord):
-        """
-        Convert an ICRS coordinate to this astrometric frame.
-
-        Parameters
-        ----------
-        icrs_coord : `~astropy.coordinates.ICRS`
-            The input ICRS coordinate.
-        """
-        icrs_coord = SkyCoord(icrs_coord)
-        if not isinstance(icrs_coord.frame, ICRS):
-            raise ValueError("Input must be an ICRS frame.")
-
-        dt = (self.obstime - _J2000).to(u.yr)
-        log.info(f"Propagating forward by {dt} after J2000.0")
-        new_sc = icrs_coord.apply_space_motion(dt=dt).transform_to(self.base)
-        return self.realize_frame(new_sc.data)

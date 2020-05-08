@@ -244,6 +244,7 @@ if has_sphinx_gallery:
             '../examples/units_and_coordinates',
             '../examples/plotting',
             '../examples/differential_rotation',
+            '../examples/astrometry',
             '../examples/saving_and_loading_data',
             '../examples/computer_vision_techniques',
         ]),
