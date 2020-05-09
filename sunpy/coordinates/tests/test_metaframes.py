@@ -8,7 +8,7 @@ from astropy.tests.helper import assert_quantity_allclose
 from astropy.time import Time
 
 import sunpy.coordinates.frames as f
-from sunpy.coordinates.metaframes import RotatedSunFrame, _rotatedsun_cache
+from sunpy.coordinates.metaframes import RotatedSunFrame, _rotatedsun_cache, AstrometricFrame
 from sunpy.physics.differential_rotation import diff_rot
 from .helpers import assert_longitude_allclose
 from .strategies import longitudes, latitudes, times
@@ -226,3 +226,24 @@ def test_rotatedsun_transforms(frame, lon, lat, obstime, rotated_time1, rotated_
     assert_quantity_allclose(result3.lat, result1.lat)
     # Use the `spherical` property since the name of the component varies with frame
     assert_quantity_allclose(result3.spherical.distance, result1.spherical.distance)
+
+
+############################
+# Tests for AstrometricFrame
+############################
+
+def test_astrometric_roundtrip():
+    obstime = '2001-02-03'
+    body = f.HeliographicStonyhurst(lon=10*u.deg, lat=20*u.deg, radius=0.5*u.AU,
+                                    d_lon=1*u.arcmin/u.s, d_lat=1*u.arcmin/u.s,
+                                    obstime=obstime)
+    hgs_frame = body.replicate_without_data()
+    observer = f.HeliographicStonyhurst(30*u.deg, 5*u.deg, 1*u.AU, obstime=obstime)
+
+    ast_frame = AstrometricFrame(base=hgs_frame, observer=observer)
+
+    body_ast = body.transform_to(ast_frame)
+    body_roundtrip = body_ast.transform_to(hgs_frame)
+
+    assert_quantity_allclose(SkyCoord(body_roundtrip).separation_3d(SkyCoord(body)), 0*u.AU,
+                             atol=1*u.m)

@@ -309,11 +309,24 @@ def _make_astrometric_cls(framecls):
         if 's' in posvel.differentials:
             distance = posvel.norm()
             if np.all(distance < _DISTANCE_THRESHOLD):  # solar-system body
-                dt = astrometric_frame.light_travel_time_from(reference_coord)
-                log.debug(f"Retarding for {dt} of light travel time")
                 pos = posvel.without_differentials()
-                pos -= posvel.differentials['s'] * dt
-                posvel = pos.with_differentials(posvel.differentials['s'])
+                vel = posvel.differentials['s'].to_cartesian()
+
+                # The light travel time (dt) for a body in linear motion satisfies the equation:
+                #   norm(D - V * dt) = c * dt
+                # where D is the observer-body vector, V is the body velocity vector,
+                # and c is the speed of light.  This turns into a quadratic equation in dt, and
+                # only the positive solution is valid:
+                #   dt = (sqrt((D dot V)^2 + (D dot D) * c2_V2) - D dot V) / c2_V2
+                # where c2_V2 = c^2 - V dot V
+                D = pos - astrometric_frame._observer_icrs_cartesian
+                c2_V2 = speed_of_light ** 2 - vel.dot(vel)
+                DdotV = D.dot(vel)
+                dt = (np.sqrt(DdotV ** 2 + D.dot(D) * c2_V2) - DdotV) / c2_V2
+                log.debug(f"Retarding for {dt.to(u.s)} of light travel time")
+
+                pos -= vel * dt
+                posvel = pos.with_differentials(posvel.differentials)
                 icrs_coord = ICRS(posvel)
             elif np.all(distance >= _DISTANCE_THRESHOLD):  # cosmic object
                 dt = (astrometric_frame.obstime - astrometric_frame.ref_epoch).to(u.yr)
@@ -336,11 +349,14 @@ def _make_astrometric_cls(framecls):
         if 's' in posvel.differentials:
             distance = posvel.norm()
             if np.all(distance < _DISTANCE_THRESHOLD):  # solar-system body
-                dt = astrometric_coord.light_travel_time_from()
-                log.debug(f"Advancing for {dt} of light travel time")
                 pos = posvel.without_differentials()
+
+                # The light travel time is straightforward to compute for an astrometric location
+                dt = (pos - astrometric_coord._observer_icrs_cartesian).norm() / speed_of_light
+                log.debug(f"Advancing for {dt.to(u.s)} of light travel time")
+
                 pos += posvel.differentials['s'] * dt
-                posvel = pos.with_differentials(posvel.differentials['s'])
+                posvel = pos.with_differentials(posvel.differentials)
                 icrs_coord = ICRS(posvel)
             elif np.all(distance >= _DISTANCE_THRESHOLD):  # cosmic object
                 dt = (astrometric_coord.obstime - astrometric_coord.ref_epoch).to(u.yr)
@@ -472,6 +488,10 @@ class AstrometricFrame:
 
         super().__init__(*args, **kwargs)
 
+        # Pre-compute the Cartesian representation of the observer location converted to ICRS
+        if self.observer is not None:
+            self._observer_icrs_cartesian = self.observer.transform_to(ICRS).cartesian
+
         # Validate main obstime
         if self.obstime is not None:
             if np.any(self.obstime != self.base.obstime):
@@ -500,20 +520,3 @@ class AstrometricFrame:
         space that is being pointed to.
         """
         return self.base.realize_frame(self.data)
-
-    def light_travel_time_from(self, body=None):
-        """
-        Returns the light travel time from a body to the observer.
-
-        Calculating the light travel time is normally an interative procedure, but for simplicity
-        this method performs only the initial step.  This will be inaccurate for fast-moving bodies.
-
-        Parameters
-        ----------
-        body : `~astropy.coordinates.SkyCoord` or low-level coordinate object.
-            The location of the body.  If ``None``, the data within this instance is used.
-        """
-        if body is None:
-            body = self.as_base()
-        distance = SkyCoord(body).separation_3d(SkyCoord(self.observer))
-        return (distance / speed_of_light).to('s')
