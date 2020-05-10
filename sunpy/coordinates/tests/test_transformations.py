@@ -9,7 +9,8 @@ from astropy.coordinates import (SkyCoord, get_body_barycentric, Angle,
                                  ConvertError, Longitude, CartesianRepresentation,
                                  get_body_barycentric_posvel,
                                  CartesianDifferential, SphericalDifferential,
-                                 HeliocentricMeanEcliptic)
+                                 HeliocentricMeanEcliptic,
+                                 frame_transform_graph)
 from astropy.time import Time
 
 from sunpy.coordinates import (Helioprojective, HeliographicStonyhurst,
@@ -19,7 +20,7 @@ from sunpy.coordinates import (Helioprojective, HeliographicStonyhurst,
                                get_earth)
 from sunpy.coordinates import sun
 from sunpy.coordinates.frames import _J2000
-from sunpy.coordinates.transformations import transform_with_sun_center
+from sunpy.coordinates.transformations import transform_with_sun_center, impose_finite_difference_dt
 from sunpy.sun.constants import radius as _RSUN, sidereal_rotation_rate
 from sunpy.time import parse_time
 
@@ -815,3 +816,31 @@ def test_transform_with_sun_center_reset():
     assert_quantity_allclose(result3.lon, result1.lon)
     assert_quantity_allclose(result3.lat, result1.lat)
     assert_quantity_allclose(result3.distance, result1.distance)
+
+
+def test_impose_finite_difference_dt():
+    # Pick a couple of FunctionTransformWithFiniteDifference transformations
+    transform_hgs_hgs = frame_transform_graph.get_transform(HeliographicStonyhurst,
+                                                            HeliographicStonyhurst).transforms[0]
+    transform_hee_gse = frame_transform_graph.get_transform(HeliocentricEarthEcliptic,
+                                                            GeocentricSolarEcliptic).transforms[0]
+
+    # Pick a crazy value for the finite-difference time step
+    crazy_dt = 123*u.yr
+
+    # Save the current dt values
+    old_dt_hgs_hgs = transform_hgs_hgs.finite_difference_dt
+    old_dt_hee_gse = transform_hee_gse.finite_difference_dt
+
+    # Make sure the current dt values aren't the crazy time step
+    assert old_dt_hgs_hgs != crazy_dt
+    assert old_dt_hee_gse != crazy_dt
+
+    # Confirm that the context manager replaces the transform attribute
+    with impose_finite_difference_dt(crazy_dt):
+        assert transform_hgs_hgs.finite_difference_dt == crazy_dt
+        assert transform_hee_gse.finite_difference_dt == crazy_dt
+
+    # Confirm that the old dt values were restored
+    assert transform_hgs_hgs.finite_difference_dt == old_dt_hgs_hgs
+    assert transform_hee_gse.finite_difference_dt == old_dt_hee_gse

@@ -20,7 +20,8 @@ below (see `astropy.coordinates.builtin_frames`).
 
 from .frames import *
 from .metaframes import *
-from .transformations import transform_with_sun_center, _make_sunpy_graph
+from .transformations import (impose_finite_difference_dt, transform_with_sun_center,
+                              _make_sunpy_graph)
 from .ephemeris import *
 from . import sun
 

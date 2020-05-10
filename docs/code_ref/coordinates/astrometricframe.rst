@@ -72,13 +72,28 @@ Using `~sunpy.coordinates.metaframes.AstrometricFrame` instead, and the observer
    (d_lon, d_lat, d_radius) in (arcsec / s, arcsec / s, km / s)
       (-2.44149313e-09, -1.22067667e-08, 119.36867142)>
 
-Transforming back reverses the propagation::
+The discrepancies compared to the earlier approach are due to the size of the finite-difference time step used to calculate the velocity (see also :ref:`astropy-coordinate-finite-difference-velocities`).
+The default time step is 1 second, but the motion of a star is very small compared to its distance on this short of a time scale.
+If the time step is changed to 1 year, the discrepancy becomes negligible.
+We use the context manager :func:`~sunpy.coordinates.transformations.impose_finite_difference_dt` to change the finite-difference time step (``finite_difference_dt``) for all transformations::
 
-  >>> ccc.transform_to(hgs_frame)
+  >>> from sunpy.coordinates import impose_finite_difference_dt
+  >>> with impose_finite_difference_dt(1*u.yr):
+  ...     cccc = c.transform_to(AstrometricFrame(base=hgs_frame, ref_epoch='J2010'))
+  >>> cccc
+  <SkyCoord (AstrometricHeliographicStonyhurst: base=<HeliographicStonyhurst Frame (obstime=2011-12-13 14:15:16.000)>, observer=None, ref_epoch=J2010.000): (lon, lat, radius) in (deg, deg, pc)
+      (-47.22671914, 41.91985087, 100.00019913)
+   (d_lon, d_lat, d_radius) in (arcsec / s, arcsec / s, km / s)
+      (-2.44707881e-09, -1.22168778e-08, 119.03531577)>
+
+Transforming back reverses the propagation (again, using the context manager)::
+
+  >>> with impose_finite_difference_dt(1*u.yr):
+  ...    print(cccc.transform_to(hgs_frame))
   <SkyCoord (HeliographicStonyhurst: obstime=2011-12-13 14:15:16.000): (lon, lat, radius) in (deg, deg, pc)
       (-47.22670834, 41.92004583, 100.00000001)
    (d_lon, d_lat, d_radius) in (arcsec / s, arcsec / s, km / s)
-      (-2.441509e-09, -1.2206818e-08, 119.36804702)>
+      (-2.44709473e-09, -1.2216929e-08, 119.03469026)>
 
 Astrometric location in an observer-based frame
 -----------------------------------------------

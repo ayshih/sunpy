@@ -46,7 +46,7 @@ from .frames import (_J2000, GeocentricEarthEquatorial, GeocentricSolarEcliptic,
 
 RSUN_METERS = constants.get('radius').si.to(u.m)
 
-__all__ = ['transform_with_sun_center',
+__all__ = ['transform_with_sun_center', 'impose_finite_difference_dt',
            'hgs_to_hgc', 'hgc_to_hgs', 'hcc_to_hpc',
            'hpc_to_hcc', 'hcc_to_hgs', 'hgs_to_hcc',
            'hpc_to_hpc',
@@ -56,6 +56,51 @@ __all__ = ['transform_with_sun_center',
            'hee_to_gse', 'gse_to_hee', 'gse_to_gse',
            'hgs_to_hci', 'hci_to_hgs', 'hci_to_hci',
            'hme_to_gei', 'gei_to_hme', 'gei_to_gei']
+
+
+@contextmanager
+def impose_finite_difference_dt(dt):
+    """
+    Context manager to impose a finite-difference time step on all applicable transformations
+
+    For each transformation in the main transformation graph that has the attribute
+    ``finite_difference_dt``, that attribute is set to the provided value.  The only standard
+    transformation with this attribute is
+    `~astropy.coordinates.transformations.FunctionTransformWithFiniteDifference`.
+
+    Parameters
+    ----------
+    dt : `~astropy.units.Quantity` or callable
+        If a quantity, this is the size of the differential used to do the finite difference.
+        If a callable, should accept ``(fromcoord, toframe)`` and return the ``dt`` value.
+
+    Examples
+    --------
+    >>> import astropy.units as u
+    >>> from sunpy.coordinates import impose_finite_difference_dt
+    >>> with impose_finite_difference_dt(1*u.yr):
+    ...     # `finite_difference_dt` will be 1*u.yr for all transformations
+    >>>     pass
+    """
+    key = 'finite_difference_dt'
+    saved_settings = []
+
+    try:
+        for from_frame in frame_transform_graph._graph:
+            for to_frame in frame_transform_graph._graph[from_frame]:
+                transform = frame_transform_graph._graph[from_frame][to_frame]
+                if hasattr(transform, key):
+                    old_setting = (transform, key, getattr(transform, key))
+                    log.debug(f"{from_frame.__name__}->{to_frame.__name__}: "
+                              f"{key} changed from {old_setting[2]} to {dt}")
+                    saved_settings.append(old_setting)
+                    setattr(transform, key, dt)
+        yield
+    finally:
+        for setting in saved_settings:
+            log.debug(f"{setting[0].fromsys.__name__}->{setting[0].tosys.__name__}: "
+                      f"{setting[1]} restored to {setting[2]}")
+            setattr(*setting)
 
 
 # Boolean flag for whether to ignore the motion of the center of the Sun in inertial space
