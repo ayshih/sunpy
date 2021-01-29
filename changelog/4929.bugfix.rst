@@ -1,0 +1,1 @@
+Fixed miscellaneous bugs with :meth:`~sunpy.map.GenericMap.draw_rectangle`.
