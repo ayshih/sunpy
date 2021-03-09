@@ -261,7 +261,7 @@ class RotatedSunFrame(SunPyBaseCoordinateFrame):
 
         counter = 0
 
-        while np.any(np.abs(error) > 1e-6 * new_distance) and counter < 10:
+        while np.any(np.abs(error) > 1e-6 * new_distance) and counter < 15:
             print(np.max(np.abs(error) / new_distance))
             new_distance += error
 

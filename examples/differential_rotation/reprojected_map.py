@@ -36,7 +36,7 @@ in_time = aiamap.date
 # at Earth (i.e., about five degrees offset in heliographic longitude compared
 # to the location of AIA in the original observation).
 
-out_time = in_time + 4*u.day
+out_time = in_time + 5*u.day
 out_frame = Helioprojective(observer='earth', obstime=out_time)
 
 ##############################################################################
