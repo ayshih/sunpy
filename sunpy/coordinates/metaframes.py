@@ -259,17 +259,23 @@ class RotatedSunFrame(SunPyBaseCoordinateFrame):
         new_distance = deepcopy(coord.spherical.distance)
         error = self._error_function(new_distance)
 
-        counter = 0
+        counter = 20
 
-        while np.any(np.abs(error) > 1e-6 * new_distance) and counter < 15:
-            print(np.max(np.abs(error) / new_distance))
+        while np.any(np.abs(error) > 1e-6 * new_distance) and counter >= 0:
+            #print(new_distance)
+            #print(np.max(np.abs(error) / new_distance))
             new_distance += error
 
-            error = self._error_function(new_distance)
+            next_error = self._error_function(new_distance)
 
-            counter += 1
+            next_error[np.logical_and(np.sign(next_error) == np.sign(error),
+                                      np.abs(next_error) > np.abs(error))] *= 1 + counter / 2
 
-        print(np.max(np.abs(error) / new_distance))
+            error = next_error
+
+            counter -= 1
+
+        #print(np.max(np.abs(error) / new_distance))
 
         newrepr = SphericalRepresentation(self.spherical.lon,
                                           self.spherical.lat,

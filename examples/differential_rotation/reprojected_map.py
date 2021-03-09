@@ -98,10 +98,24 @@ ax1 = fig.add_subplot(1, 2, 1, projection=aiamap)
 aiamap.plot(vmin=0, vmax=20000, title='Original map')
 plt.colorbar()
 
+overlay = ax1.get_coords_overlay(aiamap.coordinate_frame)
+overlay[0].set_ticks(spacing=3*u.arcmin)
+overlay[1].set_ticks(spacing=3*u.arcmin)
+overlay.grid(ls='-', color='blue')
+
 ax2 = fig.add_subplot(1, 2, 2, projection=out_warp)
 out_warp.plot(vmin=0, vmax=20000,
               title=f"Reprojected to an Earth observer {(out_time - in_time).to('day')} later")
 plt.colorbar()
 out_warp.draw_limb(color='red')
 
-plt.show()
+rsf_frame = RotatedSunFrame(base=aiamap.coordinate_frame, rotated_time=out_time)
+
+with transform_with_sun_center():
+    with Helioprojective.assume_spherical_screen(aiamap.observer_coordinate, only_off_disk=True):
+        overlay = ax2.get_coords_overlay(rsf_frame)
+        overlay[0].set_ticks(spacing=3*u.arcmin)
+        overlay[1].set_ticks(spacing=3*u.arcmin)
+        overlay.grid(ls='-', color='blue')
+
+        plt.show()
