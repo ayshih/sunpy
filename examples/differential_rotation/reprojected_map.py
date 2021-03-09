@@ -36,7 +36,7 @@ in_time = aiamap.date
 # at Earth (i.e., about five degrees offset in heliographic longitude compared
 # to the location of AIA in the original observation).
 
-out_time = in_time + 5*u.day
+out_time = in_time + 4*u.day
 out_frame = Helioprojective(observer='earth', obstime=out_time)
 
 ##############################################################################
@@ -79,7 +79,8 @@ out_wcs.coordinate_frame = rot_frame
 # over time.
 
 with transform_with_sun_center():
-    arr, _ = reproject_interp(aiamap, out_wcs, out_shape)
+    with Helioprojective.assume_spherical_screen(aiamap.observer_coordinate, only_off_disk=True):
+        arr, _ = reproject_interp(aiamap, out_wcs, out_shape)
 
 ##############################################################################
 # Finally, we create the output map and preserve the original map's plot
@@ -101,5 +102,6 @@ ax2 = fig.add_subplot(1, 2, 2, projection=out_warp)
 out_warp.plot(vmin=0, vmax=20000,
               title=f"Reprojected to an Earth observer {(out_time - in_time).to('day')} later")
 plt.colorbar()
+out_warp.draw_limb(color='red')
 
 plt.show()

@@ -1,9 +1,12 @@
 """
 Coordinate frames that are defined relative to other frames
 """
+from copy import deepcopy
+
+import numpy as np
 
 from astropy import units as u
-from astropy.coordinates import SphericalRepresentation
+from astropy.coordinates import Distance, SphericalRepresentation, UnitSphericalRepresentation
 from astropy.coordinates.attributes import Attribute, QuantityAttribute
 from astropy.coordinates.baseframe import frame_transform_graph
 from astropy.coordinates.transformations import FunctionTransform
@@ -99,6 +102,8 @@ def _make_rotatedsun_cls(framecls):
     @_transformation_debug(f"{_RotatedSunFramecls.__name__}->{framecls.__name__}")
     def rotatedsun_to_reference(rotatedsun_coord, reference_frame):
         # Transform to HCI
+        if hasattr(rotatedsun_coord, 'make_3d'):
+            rotatedsun_coord = rotatedsun_coord.make_3d()
         from_coord = rotatedsun_coord.base.realize_frame(rotatedsun_coord.data)
         hci_frame = HeliocentricInertial(obstime=rotatedsun_coord.base.obstime)
         hci_coord = from_coord.transform_to(hci_frame)
@@ -237,6 +242,39 @@ class RotatedSunFrame(SunPyBaseCoordinateFrame):
         Returns the sum of the base frame's observation time and the rotation of duration.
         """
         return self.base.obstime + self.duration
+
+    def _error_function(self, new_distance):
+        newrepr = SphericalRepresentation(self.spherical.lon,
+                                          self.spherical.lat,
+                                          new_distance)
+        coord3d = self.realize_frame(newrepr).transform_to(self.base)
+        coord2d = coord3d.realize_frame(coord3d.represent_as(UnitSphericalRepresentation))
+        return coord2d.make_3d().distance - coord3d.distance
+
+    def make_3d(self):
+        if not isinstance(self.data, UnitSphericalRepresentation):
+            return self
+
+        coord = self.as_base().make_3d()
+        new_distance = deepcopy(coord.spherical.distance)
+        error = self._error_function(new_distance)
+
+        counter = 0
+
+        while np.any(np.abs(error) > 1e-6 * new_distance) and counter < 10:
+            print(np.max(np.abs(error) / new_distance))
+            new_distance += error
+
+            error = self._error_function(new_distance)
+
+            counter += 1
+
+        print(np.max(np.abs(error) / new_distance))
+
+        newrepr = SphericalRepresentation(self.spherical.lon,
+                                          self.spherical.lat,
+                                          new_distance)
+        return self.realize_frame(newrepr)
 
 
 # For Astropy 4.3+, we need to manually remove the `obstime` frame attribute from RotatedSunFrame
