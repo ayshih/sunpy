@@ -252,7 +252,9 @@ class RotatedSunFrame(SunPyBaseCoordinateFrame):
         return coord2d.make_3d().distance - coord3d.distance
 
     def make_3d(self):
-        if not isinstance(self.data, UnitSphericalRepresentation):
+        # Skip if we already are 3D
+        distance = self.spherical.distance
+        if not (distance.unit is u.one and u.allclose(distance, 1*u.one)):
             return self
 
         coord = self.as_base().make_3d()
