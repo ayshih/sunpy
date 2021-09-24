@@ -572,22 +572,20 @@ class Helioprojective(SunPyBaseCoordinateFrame):
                       "`float` or `numpy.float64` via the NumPy method `.astype()`.")
 
         # Calculate the distance to the surface of the Sun using the law of cosines
-        cos_alpha = np.cos(lat) * np.cos(lon)
-        c = self.observer.radius**2 - self.rsun**2
-        b = -2 * self.observer.radius * cos_alpha
-        # Ignore sqrt of NaNs
-        with np.errstate(invalid='ignore'):
-            d = ((-1*b) - np.sqrt(b**2 - 4*c)) / 2  # use the "near" solution
+        d = _distances_to_sphere_surface(rep,
+                                         CartesianRepresentation(1, 0, 0) * self.observer.radius,
+                                         self.rsun)[0]  # "near" solution
 
-        if self._spherical_screen:
-            sphere_center = self._spherical_screen['center'].transform_to(self).cartesian
-            c = sphere_center.norm()**2 - self._spherical_screen['radius']**2
-            b = -2 * sphere_center.dot(rep)
-            # Ignore sqrt of NaNs
-            with np.errstate(invalid='ignore'):
-                dd = ((-1*b) + np.sqrt(b**2 - 4*c)) / 2  # use the "far" solution
+        if self._screen:
+            if self._screen['type'] == 'sphere':
+                sphere_center = self._screen['center'].transform_to(self).cartesian
+                d_screen = _distances_to_sphere_surface(rep,
+                                                        sphere_center,
+                                                        self._screen['radius'])[1]  # "far" solution
+            else:
+                raise ValueError(f"Invalid screen type: {self._screen['type']}")
 
-            d = np.fmin(d, dd) if self._spherical_screen['only_off_disk'] else dd
+            d = np.fmin(d, d_screen) if self._screen['only_off_disk'] else d_screen
 
         # This warning can be triggered in specific draw calls when plt.show() is called
         # we can not easily prevent this, so we check the specific function is being called
@@ -605,7 +603,7 @@ class Helioprojective(SunPyBaseCoordinateFrame):
                                                           lat=lat,
                                                           distance=d))
 
-    _spherical_screen = None
+    _screen = None
 
     @classmethod
     @contextmanager
@@ -661,17 +659,18 @@ class Helioprojective(SunPyBaseCoordinateFrame):
              (1914., 0., 1.00125872)]>
         """
         try:
-            old_spherical_screen = cls._spherical_screen  # nominally None
+            old_screen = cls._screen  # nominally None
 
             center_hgs = center.transform_to(HeliographicStonyhurst(obstime=center.obstime))
-            cls._spherical_screen = {
+            cls._screen = {
+                'type': 'sphere',
                 'center': center,
                 'radius': center_hgs.radius,
                 'only_off_disk': only_off_disk
             }
             yield
         finally:
-            cls._spherical_screen = old_spherical_screen
+            cls._screen = old_screen
 
 
 @add_common_docstring(**_frame_parameters())
@@ -764,3 +763,15 @@ class GeocentricEarthEquatorial(SunPyBaseCoordinateFrame):
     Aberration due to Earth motion is not included.
     """
     equinox = TimeFrameAttributeSunPy(default=_J2000)
+
+
+def _distances_to_sphere_surface(look_direction, vector_to_sphere_center, sphere_radius):
+    # Apply the law of cosines and solve with the quadratic equation
+    c = vector_to_sphere_center.norm()**2 - sphere_radius**2
+    b = -2 * vector_to_sphere_center.dot(look_direction)
+    # Ignore sqrt of NaNs
+    with np.errstate(invalid='ignore'):
+        sqrt_term = np.sqrt(b**2 - 4*c)
+
+    # Return near and far solutions
+    return ((-b-sqrt_term)/2, (-b+sqrt_term)/2)
