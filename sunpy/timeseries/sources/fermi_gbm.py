@@ -206,24 +206,22 @@ def _bin_data_for_summary(energy_bins, count_data):
         The array of count data to rebin.
     """
     # find the indices corresponding to some standard summary energy bins
-    ebands = [4, 15, 25, 50, 100, 300, 800, 2000]
-    indices = []
-    for e in ebands:
-        indices.append(np.searchsorted(energy_bins['e_max'], e))
+    ebands = np.array([4, 15, 25, 50, 100, 300, 800, 2000])
 
-    summary_counts = []
-    for i in range(0, len(count_data['counts'])):
-        counts_in_bands = []
-        for j in range(1, len(ebands)):
-            counts_in_bands.append(
-                np.sum(count_data['counts'][i][indices[j - 1]:indices[j]]) /
-                (count_data['exposure'][i] *
-                 (energy_bins['e_max'][indices[j]] -
-                  energy_bins['e_min'][indices[j - 1]])))
+    in_widths = energy_bins['e_max'] - energy_bins['e_min']
+    out_widths = ebands[1:] - ebands[:-1]
 
-        summary_counts.append(counts_in_bands)
+    in_left, out_left = np.meshgrid(energy_bins['e_min'], ebands[:-1])
+    in_right, out_right = np.meshgrid(energy_bins['e_max'], ebands[1:])
 
-    return summary_counts
+    frac_left = ((out_right - in_left) / in_widths).clip(0, 1)
+    frac_right = ((in_right - out_left) / in_widths).clip(0, 1)
+    frac = frac_left * frac_right
+
+    rebinned_counts = frac @ count_data['counts'].T
+    rebinned_count_flux = (rebinned_counts / count_data['exposure']).T / out_widths
+
+    return rebinned_count_flux
 
 
 def _parse_detector(detector):
