@@ -602,7 +602,7 @@ class Helioprojective(SunPyBaseCoordinateFrame):
 
     @classmethod
     @contextmanager
-    def assume_spherical_screen(cls, center, only_off_disk=False, *, look_through_back=True):
+    def assume_spherical_screen(cls, center, only_off_disk=False, *, look_through_back=True, as_mesh=False):
         """
         Context manager to interpret 2D coordinates as being on the inside of a spherical screen.
 
@@ -622,6 +622,8 @@ class Helioprojective(SunPyBaseCoordinateFrame):
             If `True`, apply this assumption only to off-disk coordinates, with on-disk coordinates
             still mapped onto the surface of the Sun.  Defaults to `False`.
         look_through_back : `bool`, optional
+            If `True`, stuff.
+        as_mesh : `bool`, optional
             If `True`, stuff.
 
         Examples
@@ -659,15 +661,36 @@ class Helioprojective(SunPyBaseCoordinateFrame):
             old_screen = cls._screen  # nominally None
 
             center_hgs = center.transform_to(HeliographicStonyhurst(obstime=center.obstime))
-            cls._screen = {
-                'function': _spherical_screen,
-                'kwargs': {
-                    'center': center,
-                    'radius': center_hgs.radius,
-                    'use_far': look_through_back,
-                },
-                'only_off_disk': only_off_disk
-            }
+            if as_mesh:
+                import trimesh
+
+                steps = 200
+                t = np.linspace(0, 1, steps+1)
+                theta = (0.5 / 60 * steps * t + (180 - 0.5 / 60 * steps) * (t ** 6)) * np.pi / 180
+                y, x = 1 - np.cos(theta), np.sin(theta)
+                x[-1] = 0
+
+                mesh = trimesh.creation.revolve(np.stack([x, y], axis=1), sections=180)
+
+                cls._screen = {
+                    'function': _mesh_screen,
+                    'kwargs': {
+                        'mesh': mesh,
+                        'observer': center,
+                        'radius': center_hgs.radius,
+                    },
+                    'only_off_disk': only_off_disk
+                }
+            else:
+                cls._screen = {
+                    'function': _spherical_screen,
+                    'kwargs': {
+                        'center': center,
+                        'radius': center_hgs.radius,
+                        'use_far': look_through_back,
+                    },
+                    'only_off_disk': only_off_disk
+                }
             yield
         finally:
             cls._screen = old_screen
@@ -793,3 +816,30 @@ def _spherical_screen(coord, center, radius, use_far):
         if use_far:
             return np.nanmax(both, axis=0)
         return np.nanmin(both, axis=0)
+
+
+def _mesh_screen(coord, mesh, observer, radius):
+    rep = CartesianRepresentation(mesh.vertices[:, 0],
+                                  mesh.vertices[:, 1],
+                                  mesh.vertices[:, 2]) * radius
+    mesh_coord = Heliocentric(rep, obstime=observer.obstime, observer=observer)
+    transformed_mesh_coord = mesh_coord.transform_to(coord)
+    transformed_observer = observer.transform_to(coord)
+
+    import trimesh
+    mesh2 = trimesh.Trimesh(vertices=transformed_mesh_coord.cartesian.xyz.T.value, faces=mesh.faces, process=False)
+
+    ray_origins = np.expand_dims(transformed_observer.cartesian.xyz.value, axis=0)
+    ray_directions = np.atleast_2d(coord.ravel().cartesian.xyz.T.value)
+    ray_origins_bc, ray_directions = np.broadcast_arrays(ray_origins, ray_directions)
+
+    locations, index_ray, index_tri = mesh2.ray.intersects_location(
+        ray_origins=ray_origins_bc, ray_directions=ray_directions
+    )
+
+    distances = np.linalg.norm(locations - ray_origins, axis=1)
+
+    distance = np.zeros(ray_directions.shape[0])
+    distance[index_ray] = distances
+
+    return distance.reshape(coord.shape) << transformed_observer.cartesian.xyz.unit
