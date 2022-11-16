@@ -6,6 +6,7 @@ the `astropy.coordinates` module.
 """
 import re
 import traceback
+import warnings
 from contextlib import contextmanager
 
 import numpy as np
@@ -577,13 +578,7 @@ class Helioprojective(SunPyBaseCoordinateFrame):
                                          self.rsun)[0]  # "near" solution
 
         if self._screen:
-            if self._screen['type'] == 'sphere':
-                sphere_center = self._screen['center'].transform_to(self).cartesian
-                d_screen = _distances_to_sphere_surface(rep,
-                                                        sphere_center,
-                                                        self._screen['radius'])[1]  # "far" solution
-            else:
-                raise ValueError(f"Invalid screen type: {self._screen['type']}")
+            d_screen = self._screen['function'](self, **self._screen['kwargs'])
 
             d = np.fmin(d, d_screen) if self._screen['only_off_disk'] else d_screen
 
@@ -607,7 +602,7 @@ class Helioprojective(SunPyBaseCoordinateFrame):
 
     @classmethod
     @contextmanager
-    def assume_spherical_screen(cls, center, only_off_disk=False):
+    def assume_spherical_screen(cls, center, only_off_disk=False, *, look_through_back=True):
         """
         Context manager to interpret 2D coordinates as being on the inside of a spherical screen.
 
@@ -626,6 +621,8 @@ class Helioprojective(SunPyBaseCoordinateFrame):
         only_off_disk : `bool`, optional
             If `True`, apply this assumption only to off-disk coordinates, with on-disk coordinates
             still mapped onto the surface of the Sun.  Defaults to `False`.
+        look_through_back : `bool`, optional
+            If `True`, stuff.
 
         Examples
         --------
@@ -663,9 +660,12 @@ class Helioprojective(SunPyBaseCoordinateFrame):
 
             center_hgs = center.transform_to(HeliographicStonyhurst(obstime=center.obstime))
             cls._screen = {
-                'type': 'sphere',
-                'center': center,
-                'radius': center_hgs.radius,
+                'function': _spherical_screen,
+                'kwargs': {
+                    'center': center,
+                    'radius': center_hgs.radius,
+                    'use_far': look_through_back,
+                },
                 'only_off_disk': only_off_disk
             }
             yield
@@ -775,3 +775,21 @@ def _distances_to_sphere_surface(look_direction, vector_to_sphere_center, sphere
 
     # Return near and far solutions
     return ((-b-sqrt_term)/2, (-b+sqrt_term)/2)
+
+
+def _spherical_screen(coord, center, radius, use_far):
+    sphere_center = center.transform_to(coord).cartesian
+    near, far = _distances_to_sphere_surface(coord.represent_as(UnitSphericalRepresentation),
+                                             sphere_center,
+                                             radius)
+    near[near < 0] = np.nan
+    far[far < 0] = np.nan
+    both = np.stack([near, far])
+
+    # Filter out the warning when both near and far are NaN
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore')
+
+        if use_far:
+            return np.nanmax(both, axis=0)
+        return np.nanmin(both, axis=0)
