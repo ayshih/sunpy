@@ -22,13 +22,13 @@ class TransformationHeliographic:
             'HGC': f.HeliographicCarrington(vect, obstime=obstime, observer=observer),
             'HCC': f.Heliocentric(vect, obstime=obstime, observer=observer),
             'HPC': f.Helioprojective(vect, obstime=obstime, observer=observer),
-            'HPR': f.HelioprojectiveRadial(vect, obstime=obstime, observer=observer),
+            'HPR': f.HelioprojectiveRadial(vect, obstime=obstime, observer=observer) if hasattr(f, 'HelioprojectiveRadial') else None,
             'HCI': f.HeliocentricInertial(vect, obstime=obstime),
         }
         return frames
 
     def setup(self, frames, src, dest):
-        if src == dest:
+        if src == dest or frames[src] is None or frames[dest] is None:
             raise SkipNotImplemented
 
     def time_transform(self, frames, src, dest):
@@ -53,7 +53,7 @@ class TransformationEcliptic:
         return frames
 
     def setup(self, frames, src, dest):
-        if src == dest:
+        if src == dest or frames[src] is None or frames[dest] is None:
             raise SkipNotImplemented
 
     def time_transform(self, frames, src, dest):
@@ -71,14 +71,14 @@ class TransformationMagnetic:
         vect = SphericalRepresentation(0*u.deg, 0*u.deg, 1*u.AU)
         frames = {
             'GEO': ITRS(vect, obstime=obstime),
-            'MAG': f.Geomagnetic(vect, obstime=obstime),
-            'SM': f.SolarMagnetic(vect, obstime=obstime),
-            'GSM': f.GeocentricSolarMagnetospheric(vect, obstime=obstime),
+            'MAG': f.Geomagnetic(vect, obstime=obstime) if hasattr(f, 'Geomagnetic') else None,
+            'SM': f.SolarMagnetic(vect, obstime=obstime) if hasattr(f, 'SolarMagnetic') else None,
+            'GSM': f.GeocentricSolarMagnetospheric(vect, obstime=obstime) if hasattr(f, 'GeocentricSolarMagnetospheric') else None,
         }
         return frames
 
     def setup(self, frames, src, dest):
-        if src == dest:
+        if src == dest or frames[src] is None or frames[dest] is None:
             raise SkipNotImplemented
 
     def time_transform(self, frames, src, dest):
