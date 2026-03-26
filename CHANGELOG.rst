@@ -1,3 +1,12 @@
+7.0.5 (2026-03-26)
+==================
+
+Bug Fixes
+---------
+
+- Fixed a bug in `sunpy.coordinates.spice` when converting times to the time scale/format used by SPICE, which resulted in a time inaccuracy of up to 1.6 ms. (`#8534 <https://github.com/sunpy/sunpy/pull/8534>`__)
+
+
 7.0.4 (2025-12-04)
 ==================
 
